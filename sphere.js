@@ -92,10 +92,9 @@ function Project3DPointOnto2DScreen(v) {
   }
   const x2D = x3D / z3D;
   const y2D = y3D / z3D;
-  const xp = (x2D + 1) / 2;
-  const yp = (y2D + 1) / 2;
-  const screenX = xp * canvas.width;
-  const screenY = yp * canvas.height;
+  const wh = Math.min(canvas.width, canvas.height);
+  const screenX = (canvas.width + x2D * wh) / 2;
+  const screenY = (canvas.height + y2D * wh) / 2;
   return [screenX, screenY];
 }
 
