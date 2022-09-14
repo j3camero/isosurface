@@ -61,25 +61,27 @@ function VectorSubtract(a, b) {
   return result;
 }
 
+function ScalarMultiply(v, scalar) {
+  const result = [];
+  for (const value of v) {
+    result.push(value * scalar);
+  }
+  return result;
+}
+
 function VectorDistance(a, b) {
   const diff = VectorSubtract(a, b);
   return Length(diff);
 }
 
-const numPoints = 42;
-const points = [];
-for (let i = 0; i < numPoints; i++) {
-  const p = GenerateRandomUnitVector();
-  points.push(p);
+function Midpoint(a, b) {
+  const sum = VectorAdd(a, b);
+  const midpoint = ScalarMultiply(sum, 0.5);
+  return midpoint;
 }
-console.log(points);
-const alpha = 0;
-const triangles = AlphaShape(alpha, points);
-console.log(triangles);
 
 const canvas = document.getElementById('thecanvas');
 const context = canvas.getContext('2d');
-
 const cameraPosition = [0, 0, -2];
 
 function Project3DPointOnto2DScreen(v) {
@@ -119,24 +121,60 @@ function DrawLine3D(from3D, to3D) {
   context.stroke();
 }
 
-function Draw() {
+function Draw(points, triangles) {
   context.fillStyle = 'black';
   context.fillRect(0, 0, canvas.width, canvas.height);
+  const lines = [];
   for (const [i, j, k] of triangles) {
     const a = points[i];
     const b = points[j];
     const c = points[k];
-    DrawLine3D(a, b);
-    DrawLine3D(b, c);
-    DrawLine3D(c, a);
+    lines.push({ from: a, to: b });
+    lines.push({ from: b, to: c });
+    lines.push({ from: c, to: a });
   }
+  lines.sort((a, b) => {
+    const m1 = Midpoint(a.from, a.to);
+    const m2 = Midpoint(b.from, b.to);
+    const z1 = m1[2];
+    const z2 = m2[2];
+    if (z1 < z2) {
+      return 1;
+    }
+    if (z1 > z2) {
+      return -1;
+    }
+    return 0;
+  });
+  for (const line of lines) {
+    DrawLine3D(line.from, line.to);
+  }
+}
+
+function DoOneFrame() {
+  const numPoints = 256;
+  const points = [];
+  for (let i = 0; i < numPoints; i++) {
+    const p = GenerateRandomUnitVector();
+    points.push(p);
+  }
+  const startTime = new Date().getTime();
+  const alpha = 0;
+  const triangles = AlphaShape(alpha, points);
+  Draw(points, triangles);
+  const endTime = new Date().getTime();
+  const elapsed = endTime - startTime;
+  const targetFrameDuration = 1000;
+  const timeUntilNextFrame = Math.max(targetFrameDuration - elapsed, 0);
+  console.log('frame', timeUntilNextFrame);
+  setTimeout(DoOneFrame, timeUntilNextFrame);
 }
 
 function OnResize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-  Draw();
 }
 
 window.addEventListener('resize', OnResize, false);
 OnResize();
+DoOneFrame();
