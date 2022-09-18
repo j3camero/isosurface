@@ -213,7 +213,7 @@ function DrawDual(points, triangles) {
   }
 }
 
-const numPoints = 379;
+const numPoints = 470;
 const points = [];
 for (let i = 0; i < numPoints; i++) {
   const p = GenerateRandomUnitVector();
@@ -231,8 +231,10 @@ function CalculateElectrostaticPotential() {
   return potential;
 }
 
+let forceStrength = 0.1;
+let oldPoints = [];
+
 function RepelPoints() {
-  const forceStrength = 100 / (numPoints * numPoints);
   const forces = [];
   for (let i = 0; i < numPoints; i++) {
     let force = [0, 0, 0];
@@ -249,10 +251,20 @@ function RepelPoints() {
     }
     forces.push(force);
   }
+  oldPoints = [];
   for (let i = 0; i < numPoints; i++) {
+    oldPoints.push(points[i]);
     points[i] = Normalize(VectorAdd(points[i], forces[i]));
   }
 }
+
+function RevertPoints() {
+  for (let i = 0; i < numPoints; i++) {
+    points[i] = oldPoints[i];
+  }
+}
+
+let oldPotential;
 
 function DoOneFrame() {
   const startTime = new Date().getTime();
@@ -262,9 +274,18 @@ function DoOneFrame() {
   DrawDual(points, triangles);
   RepelPoints();
   const potential = CalculateElectrostaticPotential();
+  if (oldPotential && potential > oldPotential) {
+    // Revert the points and also don't update oldPotential.
+    RevertPoints();
+    forceStrength *= 0.5;
+    console.log('LOSS!');
+  } else {
+    oldPotential = potential;
+    forceStrength *= 1.1;
+  }
   const endTime = new Date().getTime();
   const elapsed = endTime - startTime;
-  console.log('frame', elapsed, 'potential', potential);
+  console.log('potential', potential.toFixed(8), 'force', forceStrength.toFixed(8), 'elapsed', elapsed);
   const targetFrameDuration = 30;
   const timeUntilNextFrame = Math.max(targetFrameDuration - elapsed, 0);
   setTimeout(DoOneFrame, timeUntilNextFrame);
