@@ -151,7 +151,69 @@ function Draw(points, triangles) {
   }
 }
 
-const numPoints = 373;
+function DrawDual(points, triangles) {
+  context.fillStyle = 'black';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const dualPoints = [];
+  const edges = {};
+
+  function AddEdge(pointIndexA, pointIndexB, triangleIndex) {
+    const mini = Math.min(pointIndexA, pointIndexB);
+    const maxi = Math.max(pointIndexA, pointIndexB);
+    if (!(mini in edges)) {
+      edges[mini] = {};
+    }
+    if (maxi in edges[mini]) {
+      edges[mini][maxi].push(triangleIndex);
+    } else {
+      edges[mini][maxi] = [triangleIndex];
+    }
+  }
+
+  let triangleIndex = 0;
+  for (const [i, j, k] of triangles) {
+    const a = points[i];
+    const b = points[j];
+    const c = points[k];
+    const sum = VectorAdd(a, VectorAdd(b, c));
+    const centroid = Normalize(ScalarMultiply(sum, 1 / 3));
+    dualPoints.push(centroid);
+    AddEdge(i, j, triangleIndex);
+    AddEdge(j, k, triangleIndex);
+    AddEdge(i, k, triangleIndex);
+    triangleIndex++;
+  }
+  const lines = [];
+  for (const i in edges) {
+    for (const j in edges[i]) {
+      const e = edges[i][j];
+      const a = e[0];
+      const b = e[1];
+      lines.push({
+        from: dualPoints[a],
+        to: dualPoints[b],
+      });
+    }
+  }
+  lines.sort((a, b) => {
+    const m1 = Midpoint(a.from, a.to);
+    const m2 = Midpoint(b.from, b.to);
+    const z1 = m1[2];
+    const z2 = m2[2];
+    if (z1 < z2) {
+      return 1;
+    }
+    if (z1 > z2) {
+      return -1;
+    }
+    return 0;
+  });
+  for (const line of lines) {
+    DrawLine3D(line.from, line.to);
+  }
+}
+
+const numPoints = 379;
 const points = [];
 for (let i = 0; i < numPoints; i++) {
   const p = GenerateRandomUnitVector();
@@ -196,7 +258,8 @@ function DoOneFrame() {
   const startTime = new Date().getTime();
   const alpha = 0;
   const triangles = AlphaShape(alpha, points);
-  Draw(points, triangles);
+  //Draw(points, triangles);
+  DrawDual(points, triangles);
   RepelPoints();
   const potential = CalculateElectrostaticPotential();
   const endTime = new Date().getTime();
