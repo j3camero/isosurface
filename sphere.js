@@ -151,22 +151,59 @@ function Draw(points, triangles) {
   }
 }
 
-function DoOneFrame() {
-  const numPoints = 256;
-  const points = [];
+const numPoints = 373;
+const points = [];
+for (let i = 0; i < numPoints; i++) {
+  const p = GenerateRandomUnitVector();
+  points.push(p);
+}
+
+function CalculateElectrostaticPotential() {
+  let potential = 0;
   for (let i = 0; i < numPoints; i++) {
-    const p = GenerateRandomUnitVector();
-    points.push(p);
+    for (let j = i + 1; j < numPoints; j++) {
+      const d = Length(VectorSubtract(points[i], points[j]));
+      potential += 1 / d;
+    }
   }
+  return potential;
+}
+
+function RepelPoints() {
+  const forceStrength = 100 / (numPoints * numPoints);
+  const forces = [];
+  for (let i = 0; i < numPoints; i++) {
+    let force = [0, 0, 0];
+    for (let j = 0; j < numPoints; j++) {
+      if (i === j) {
+        continue;
+      }
+      const diff = VectorSubtract(points[i], points[j]);
+      const sq = SquaredLength(diff);
+      const inv = 1.0 / sq;
+      const dir = Normalize(diff);
+      const f = ScalarMultiply(dir, forceStrength * inv);
+      force = VectorAdd(force, f);
+    }
+    forces.push(force);
+  }
+  for (let i = 0; i < numPoints; i++) {
+    points[i] = Normalize(VectorAdd(points[i], forces[i]));
+  }
+}
+
+function DoOneFrame() {
   const startTime = new Date().getTime();
   const alpha = 0;
   const triangles = AlphaShape(alpha, points);
   Draw(points, triangles);
+  RepelPoints();
+  const potential = CalculateElectrostaticPotential();
   const endTime = new Date().getTime();
   const elapsed = endTime - startTime;
-  const targetFrameDuration = 1000;
+  console.log('frame', elapsed, 'potential', potential);
+  const targetFrameDuration = 30;
   const timeUntilNextFrame = Math.max(targetFrameDuration - elapsed, 0);
-  console.log('frame', timeUntilNextFrame);
   setTimeout(DoOneFrame, timeUntilNextFrame);
 }
 
