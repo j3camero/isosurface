@@ -213,7 +213,7 @@ function DrawDual(points, triangles) {
   }
 }
 
-const numPoints = 470;
+const numPoints = 372;
 const points = [];
 for (let i = 0; i < numPoints; i++) {
   const p = GenerateRandomUnitVector();
@@ -277,7 +277,7 @@ function DoOneFrame() {
   if (oldPotential && potential > oldPotential) {
     // Revert the points and also don't update oldPotential.
     RevertPoints();
-    forceStrength *= 0.5;
+    forceStrength *= 0.1;
     console.log('LOSS!');
   } else {
     oldPotential = potential;
