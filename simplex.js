@@ -15,9 +15,6 @@ function Draw(points, triangles) {
       const y = j / zoom;
       const h = simplex(x, y, 0);
       const p = 0.5 * (h + 1);
-      //const c = Math.floor(p * 255);
-      //const c = p > 0.6 ? 255 : 0;
-      //context.fillStyle = `rgb(${c},${c},${c})`;
       if (p < 0.3) {
         context.fillStyle = '#105C8C';
       } else if (p < 0.55) {
