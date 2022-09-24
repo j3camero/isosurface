@@ -1,14 +1,14 @@
 const alea = require('alea');
 const SimplexNoise = require('simplex-noise');
 
-const prng = alea(999);
+const prng = alea('12345');
 const simplex = SimplexNoise.createNoise3D(prng);
 
 const canvas = document.getElementById('thecanvas');
 const context = canvas.getContext('2d');
 
 function Draw(points, triangles) {
-  const zoom = 128;
+  const zoom = 256;
   for (let i = 0; i < canvas.width; i++) {
     for (let j = 0; j < canvas.height; j++) {
       const x = i / zoom;

@@ -4,8 +4,11 @@ const SimplexNoise = require('simplex-noise');
 const canvas = document.getElementById('thecanvas');
 const context = canvas.getContext('2d');
 
-const prng = alea('123');
+const prng = alea('12345');
 const simplexState = SimplexNoise.createNoise3D(prng);
+
+const bigNumber = 1000 * 1000;
+const infinitessimal = 1 / bigNumber;
 
 // Return a field. The desired level curve is defined by f(x, y, z) = 0.
 function Simplex(v) {
@@ -18,16 +21,22 @@ function Simplex(v) {
   return p - levelCurve;
 }
 
-function Gradient(v) {
+// Helper function. The square of the simplex field.
+function SimplexSquared(v) {
+  const s = Simplex(v);
+  return s * s;
+}
+
+// Return the numerical derivative (gradient) of the 3D function f at the
+// 3D point v.
+function Gradient(f, v) {
   const x = v[0];
   const y = v[1];
   const z = v[2];
-  const bigNumber = 1000000;
-  const infinitessimal = 1 / bigNumber;
-  const h = Simplex(v);
-  const dx = Simplex([x + infinitessimal, y, z]) - h;
-  const dy = Simplex([x, y + infinitessimal, z]) - h;
-  const dz = Simplex([x, y, z + infinitessimal]) - h;
+  const h = f(v);
+  const dx = f([x + infinitessimal, y, z]) - h;
+  const dy = f([x, y + infinitessimal, z]) - h;
+  const dz = f([x, y, z + infinitessimal]) - h;
   return [dx * bigNumber, dy * bigNumber, dz * bigNumber];
 }
 
@@ -107,17 +116,48 @@ function Midpoint(a, b) {
   return midpoint;
 }
 
+// Uses gradient descent to find the nearest isosurface or local minimum.
+//
+// Use NewtonRaphson instead if you know that the nearest isosurface is very
+// close by. Use GradientDescent if you don't have any such guarantee. It's
+// slower, but safer. GradientDescent converges no matter what. If v starts off
+// in a basin, the local minimum will be returned.
+function GradientDescent(v) {
+  let x = VectorCopy(v);
+  const speedLimit = 0.01;
+  const speedMultiplier = 0.05;
+  let step = 1;
+  while (true) {
+    const gradient = Gradient(SimplexSquared, x);
+    const slope = Length(gradient);
+    const speed = Math.min(speedMultiplier * slope, speedLimit);
+    const direction = Normalize(ScalarMultiply(gradient, -1));
+    const dx = ScalarMultiply(direction, speed);
+    x = VectorAdd(x, dx);
+    console.log(step, speed.toFixed(8));
+    if (Math.abs(speed) < infinitessimal) {
+      break;
+    }
+    step++;
+  }
+  return x;
+}
+
 // Finds the point on the isosurface that is "downhill" from an arbitrary point
 // in 3D space.
 //
-// Uses gradient descent to descend to the surface while following the gradient.
-function Descend(v) {
+// Uses a speed-limited Newton-Raphson method to descend the gradient. This
+// method is fast but might fail to converge if v starts off in a basin with
+// a local minimum. Only use this method if you know the isosurface is nearby.
+// If you don't have any such guarantee, then use the slower but safer
+// GradientDescent.
+function NewtonRaphson(v) {
   let x = VectorCopy(v);
   const speedLimit = 0.01;
   let step = 1;
   while (true) {
     const value = Simplex(x);
-    const gradient = Gradient(x);
+    const gradient = Gradient(Simplex, x);
     const slope = Length(gradient);
     const newtonsMethod = value / slope;
     const speed = Math.min(newtonsMethod, speedLimit);
@@ -125,8 +165,7 @@ function Descend(v) {
     const dx = ScalarMultiply(direction, speed);
     x = VectorAdd(x, dx);
     console.log(step, value.toFixed(8), speed.toFixed(8));
-    const threshold = 0.0000001;
-    if (Math.abs(value) < threshold && Math.abs(speed) < threshold) {
+    if (Math.abs(value) < infinitessimal && Math.abs(speed) < infinitessimal) {
       break;
     }
     step++;
@@ -158,6 +197,7 @@ window.addEventListener('resize', OnResize, false);
 OnResize();
 DoOneFrame();
 
-const r = [Math.random(), Math.random(), Math.random()];
-const p = Descend(r);
-console.log(p);
+const origin = [0, 0, 0];
+const a = GradientDescent(origin);
+const b = NewtonRaphson(a);
+console.log(a, b);
