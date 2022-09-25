@@ -224,6 +224,11 @@ function GenerateRandomUnitVectorOrthogonalToNormalVector(n) {
   return VectorAdd(ua, vb);
 }
 
+// Returns a 3D point that is nearby the given point p.
+//
+// p is not modified. A new point is returned. The new point is displaced by a
+// distance of approximately speedLimit in a random direction orthogonal to
+// the gradient at p. ie: displaced along the curved surface.
 function RandomlyDisplaceParticleAlongSurface(p) {
   const gradient = Gradient(Simplex, p);
   const r = GenerateRandomUnitVectorOrthogonalToNormalVector(gradient);
@@ -231,6 +236,36 @@ function RandomlyDisplaceParticleAlongSurface(p) {
   const q = VectorAdd(p, v);
   const s = NewtonRaphson(q);
   return s;
+}
+
+// The particles used in the simulation.
+const particles = [];
+
+// Add one new particle to the simulation.
+//
+// The core problem to be solved here is that the new point has to be guaranteed
+// to be on the same isosurface as all the others. We don't want to "hop" too
+// far from the existing points or else we risk ending up sticking to a
+// different isosurface, effectively "escaping" the targeted shape. The strategy
+// to solve this is to stay very close to one of the existing points. We place
+// the new particle very close to one of the existing points, chosen at random.
+//
+// We depend entirely on the elctrostatic repulsion force between the particles
+// to floodfill the isosurface. As the particles multiply and repel each other,
+// they should fill the whole isosurface.
+//
+// We don't rely on creating particles in random locations to discover the
+// regions of the isosurface to be filled. The reason is this risks hopping to
+// disconnected isosurfaces that tend to exist around the targeted one. The
+// extent and shape of the targeted isosurface is unknown to the algorithm at
+// the beginning, and we rely entirely on the particles pushing each other along
+// to flood the entire isosurface.
+function AddOneNewParticle() {
+  const n = particles.length;
+  const r = Math.floor(Math.random() * n);
+  const p = particles[r];
+  const newParticle = RandomlyDisplaceParticleAlongSurface(p);
+  particles.push(newParticle);
 }
 
 // Projects a 3D vector onto a plane defined by a normal vector.
@@ -242,8 +277,6 @@ function ProjectVectorOntoPlane(v, n) {
   const dv = ScalarMultiply(n, mag);
   return VectorSubtract(v, dv);
 }
-
-const particles = [];
 
 function RepelPoints() {
   const n = particles.length;
