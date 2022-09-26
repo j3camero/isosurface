@@ -27,7 +27,7 @@ function Simplex(v) {
   const z = v[2];
   const s = simplexState(x, y, z);
   const p = 0.5 * (s + 1);
-  const levelCurve = 0.3;
+  const levelCurve = 0.2;
   return p - levelCurve;
 }
 
@@ -134,7 +134,9 @@ function Midpoint(a, b) {
 // in a basin, the local minimum will be returned.
 function GradientDescent(v) {
   let x = VectorCopy(v);
-  const speedMultiplier = 0.05;
+  const speedMultiplier = 0.1;
+  const maxSteps = 100;
+  let step = 1;
   while (true) {
     const gradient = Gradient(SimplexSquared, x);
     const slope = Length(gradient);
@@ -145,6 +147,10 @@ function GradientDescent(v) {
     const direction = Normalize(ScalarMultiply(gradient, -1));
     const dx = ScalarMultiply(direction, speed);
     x = VectorAdd(x, dx);
+    if (step > maxSteps) {
+      break;
+    }
+    step++;
   }
   const value = SimplexSquared(x);
   // If we're close enough to the isosurface, finish it off with NewtonRaphson.
@@ -318,17 +324,149 @@ function RepelPoints() {
   return maxMagnitude;
 }
 
-function Draw(points, triangles) {
-
+// Given a list of 2D points like [(x, y), ...] returns a point [cx, cy] that
+// can "see" all the points pointing in the forward direction (0, 1).
+function CalculateCameraPosition2D(points, aspectRatio) {
+  const margin = 1.0;
+  const slope = margin / aspectRatio;
+  let minA;
+  let minB;
+  for (const [x, y] of points) {
+    const a = y + slope * x;
+    const b = y - slope * x;
+    if (!minA || a < minA) {
+      minA = a;
+    }
+    if (!minB || b < minB) {
+      minB = b;
+    }
+  }
+  const cx = (minA - minB) / (2 * slope);
+  const cy = (minA + minB) / 2;
+  return [cx, cy];
 }
+
+function TranslatePointsInFrontOfCamera(points) {
+  const xz = [];
+  const yz = [];
+  for (const [x, y, z] of points) {
+    xz.push([x, z]);
+    yz.push([y, z]);
+  }
+  const wh = Math.min(canvas.width, canvas.height);
+  const aspectRatioX = canvas.width / wh;
+  const aspectRatioY = canvas.height / wh;
+  const [cameraX, cameraZ1] = CalculateCameraPosition2D(xz, aspectRatioX);
+  const [cameraY, cameraZ2] = CalculateCameraPosition2D(yz, aspectRatioY);
+  const cameraZ = Math.min(cameraZ1, cameraZ2) - 0.1;
+  const translated = [];
+  for (const [x, y, z] of points) {
+    translated.push([x - cameraX, y - cameraY, z - cameraZ]);
+  }
+  return translated;
+}
+
+function GradientColor(gradient, brightness) {
+  gradient = Normalize(gradient);
+  const r = Math.floor(255 * brightness * Math.abs(gradient[0]));
+  const g = Math.floor(255 * brightness * Math.abs(gradient[1]));
+  const b = Math.floor(255 * brightness * Math.abs(gradient[2]));
+  return `rgb(${r},${g},${b})`;
+}
+
+function DrawPoint3D(p, gradient) {
+  const [x, y, z] = p;
+  if (z < infinitessimal) {
+    return;
+  }
+  const screenX = canvas.width * (x / z + 1) / 2;
+  const screenY = canvas.height * (y / z + 1) / 2;
+  if (screenX < 0 || screenX > canvas.width ||
+      screenY < 0 || screenY > canvas.height) {
+    return;
+  }
+  const d2 = SquaredLength(p);
+  const brightnessMultiplier = 25;
+  const brightness = brightnessMultiplier / d2;
+  const minRadius = 1;
+  const brightnessThreshold = Math.PI * minRadius * minRadius;
+  if (brightness > brightnessThreshold) {
+    const radius = Math.sqrt(brightness / Math.PI);
+    context.fillStyle = GradientColor(gradient, 1);
+    context.beginPath();
+    context.arc(screenX, screenY, radius, 0, 2 * Math.PI);
+    context.fill();
+  } else {
+    context.fillStyle = GradientColor(gradient, brightness / brightnessThreshold);
+    context.beginPath();
+    context.arc(screenX, screenY, minRadius, 0, 2 * Math.PI);
+    context.fill();
+  }
+}
+
+function RotatePoints(points, angle) {
+  const rotated = [];
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  for (const [x, y, z] of points) {
+    rotated.push([
+      x * c - z * s,
+      y,
+      z * c + x * s,
+    ]);
+  }
+  return rotated;
+}
+
+function TranslatePoints(points, offset) {
+  const translated = [];
+  for (const p of points) {
+    translated.push(VectorAdd(p, offset));
+  }
+  return translated;
+}
+
+let cameraRotation = 0;
+
+function Draw() {
+  context.fillStyle = 'rgb(0, 0, 0)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  const gradients = [];
+  for (const p of particles) {
+    gradients.push(Gradient(Simplex, p));
+  }
+  const rotated = RotatePoints(particles, cameraRotation);
+  const translated = TranslatePoints(rotated, [0, 0, 3]);
+  //const vertices = TranslatePointsInFrontOfCamera(rotated);
+  const n = particles.length;
+  for (let i = 0; i < n; i++) {
+    const v = translated[i];
+    const g = gradients[i];
+    DrawPoint3D(v, g);
+  }
+}
+
+// Standard Normal variate using Box-Muller transform.
+function RandomGaussian(mean, stdev) {
+    const u = 1 - Math.random();  // Converting [0,1) to (0,1)
+    const v = Math.random();
+    const n = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    return n * stdev + mean;
+}
+
+let lastFrameEndTime = new Date().getTime();
 
 function DoOneFrame() {
   const startTime = new Date().getTime();
   Draw();
   const endTime = new Date().getTime();
+  const timeBetweenFrames = lastFrameEndTime - endTime;
+  cameraRotation += 0.00005 * timeBetweenFrames;
+  lastFrameEndTime = endTime;
   const elapsed = endTime - startTime;
-  const targetFrameDuration = 30;
+  const targetFrameDuration = 10;
   const timeUntilNextFrame = Math.max(targetFrameDuration - elapsed, 0);
+  console.log('sleep', timeUntilNextFrame);
   setTimeout(DoOneFrame, timeUntilNextFrame);
 }
 
@@ -347,9 +485,25 @@ function Start() {
   if (SimplexSquared(firstParticle) > infinitessimal) {
     throw 'This seed does not generate a valid shape. Converged to local minimum.';
   }
-  particles.push(firstParticle);
-  const secondParticle = RandomlyDisplaceParticleAlongSurface(firstParticle);
-  console.log(firstParticle, secondParticle);
+  //particles.push(firstParticle);
+  //const secondParticle = RandomlyDisplaceParticleAlongSurface(firstParticle);
+  //console.log(firstParticle, secondParticle);
+  for (let i = 0; i < 25 * 1000; i++) {
+    // const stdev = 5;
+    // const r = [
+    //   RandomGaussian(0, stdev),
+    //   RandomGaussian(0, stdev),
+    //   RandomGaussian(0, stdev),
+    // ];
+    const scale = 1.5;
+    const r = [
+      scale * (Math.random() * 2 - 1),
+      scale * (Math.random() * 2 - 1),
+      scale * (Math.random() * 2 - 1),
+    ];
+    const s = GradientDescent(r);
+    particles.push(s);
+  }
   DoOneFrame();
 }
 
