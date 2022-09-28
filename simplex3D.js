@@ -4,11 +4,12 @@ const SimplexNoise = require('simplex-noise');
 const canvas = document.getElementById('thecanvas');
 const context = canvas.getContext('2d');
 
-const prng = alea('12345');
+const seed = '1111111111111111111111111111';
+const prng = alea(seed);
 const simplexState = SimplexNoise.createNoise3D(prng);
 
 // A big number used to define the infinitessimal.
-const bigNumber = 1000 * 1000;
+const bigNumber = 100 * 1000;
 // A tiny number that is re-used throughout the code as a threshold for
 // "close enough" to zero.
 const infinitessimal = 1 / bigNumber;
@@ -18,7 +19,11 @@ const infinitessimal = 1 / bigNumber;
 // without any drastic changes or errors.
 const speedLimit = 0.01;
 // Global multiplier for electrostatic repulsion forces between the particles.
-let forceStrength = 0.01;
+let forceStrength = 0.00001;
+// The maximum number of particles that will be created inside the simulation.
+const targetParticleCount = 512;
+// Overall brightness modified to adjust the brightness of 3D shapes and points.
+const brightnessMultiplier = 25;
 
 // Return a field. The desired level curve is defined by f(x, y, z) = 0.
 function Simplex(v) {
@@ -135,8 +140,8 @@ function Midpoint(a, b) {
 function GradientDescent(v) {
   let x = VectorCopy(v);
   const speedMultiplier = 0.1;
-  const maxSteps = 100;
-  let step = 1;
+  //const maxSteps = 100;
+  //let step = 1;
   while (true) {
     const gradient = Gradient(SimplexSquared, x);
     const slope = Length(gradient);
@@ -147,10 +152,10 @@ function GradientDescent(v) {
     const direction = Normalize(ScalarMultiply(gradient, -1));
     const dx = ScalarMultiply(direction, speed);
     x = VectorAdd(x, dx);
-    if (step > maxSteps) {
-      break;
-    }
-    step++;
+    //if (step > maxSteps) {
+    //  break;
+    //}
+    //step++;
   }
   const value = SimplexSquared(x);
   // If we're close enough to the isosurface, finish it off with NewtonRaphson.
@@ -327,7 +332,7 @@ function RepelPoints() {
 // Given a list of 2D points like [(x, y), ...] returns a point [cx, cy] that
 // can "see" all the points pointing in the forward direction (0, 1).
 function CalculateCameraPosition2D(points, aspectRatio) {
-  const margin = 1.0;
+  const margin = 1.05;
   const slope = margin / aspectRatio;
   let minA;
   let minB;
@@ -358,7 +363,7 @@ function TranslatePointsInFrontOfCamera(points) {
   const aspectRatioY = canvas.height / wh;
   const [cameraX, cameraZ1] = CalculateCameraPosition2D(xz, aspectRatioX);
   const [cameraY, cameraZ2] = CalculateCameraPosition2D(yz, aspectRatioY);
-  const cameraZ = Math.min(cameraZ1, cameraZ2) - 0.1;
+  const cameraZ = Math.min(cameraZ1, cameraZ2) - 0.5;
   const translated = [];
   for (const [x, y, z] of points) {
     translated.push([x - cameraX, y - cameraY, z - cameraZ]);
@@ -366,11 +371,44 @@ function TranslatePointsInFrontOfCamera(points) {
   return translated;
 }
 
+function Centroid(points) {
+  let sum = [0, 0, 0];
+  for (const p of points) {
+    sum = VectorAdd(p, sum);
+  }
+  const n = points.length;
+  const centroid = ScalarMultiply(sum, 1 / n);
+  return centroid;
+}
+
 function GradientColor(gradient, brightness) {
-  gradient = Normalize(gradient);
-  const r = Math.floor(255 * brightness * Math.abs(gradient[0]));
-  const g = Math.floor(255 * brightness * Math.abs(gradient[1]));
-  const b = Math.floor(255 * brightness * Math.abs(gradient[2]));
+  const [x, y, z] = Normalize(gradient);
+  //const r = Math.floor(255 * brightness * Math.abs(gradient[0]));
+  //const g = Math.floor(255 * brightness * Math.abs(gradient[1]));
+  //const b = Math.floor(255 * brightness * Math.abs(gradient[2]));
+  let color = [0, 0, 0];
+  if (x > 0) {
+    color = VectorAdd(color, ScalarMultiply([1, 0, 0], x));
+  }
+  if (y > 0) {
+    color = VectorAdd(color, ScalarMultiply([0, 0, 1], y));
+  }
+  if (z > 0) {
+    color = VectorAdd(color, ScalarMultiply([1, 0.5, 0], z));
+  }
+  if (x < 0) {
+    color = VectorAdd(color, ScalarMultiply([0, 1, 0], -x));
+  }
+  if (y < 0) {
+    color = VectorAdd(color, ScalarMultiply([1, 1, 0], -y));
+  }
+  if (z < 0) {
+    color = VectorAdd(color, ScalarMultiply([1, 0, 1], -z));
+  }
+  const m = Math.max(color[0], color[1], color[2]);
+  const r = Math.floor(255 * color[0] / m);
+  const g = Math.floor(255 * color[1] / m);
+  const b = Math.floor(255 * color[2] / m);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -379,14 +417,14 @@ function DrawPoint3D(p, gradient) {
   if (z < infinitessimal) {
     return;
   }
-  const screenX = canvas.width * (x / z + 1) / 2;
-  const screenY = canvas.height * (y / z + 1) / 2;
+  const wh = Math.min(canvas.width, canvas.height);
+  const screenX = 0.5 * (canvas.width + wh * x / z);
+  const screenY = 0.5 * (canvas.height + wh * y / z);
   if (screenX < 0 || screenX > canvas.width ||
       screenY < 0 || screenY > canvas.height) {
     return;
   }
   const d2 = SquaredLength(p);
-  const brightnessMultiplier = 25;
   const brightness = brightnessMultiplier / d2;
   const minRadius = 1;
   const brightnessThreshold = Math.PI * minRadius * minRadius;
@@ -426,6 +464,18 @@ function TranslatePoints(points, offset) {
   return translated;
 }
 
+function MaxMagnitude(points) {
+  let max;
+  for (const p of points) {
+    const mag = Length(p);
+    if (!max || mag > max) {
+      max = mag;
+    }
+  }
+  return max;
+}
+
+let cameraDistance = 1;
 let cameraRotation = 0;
 
 function Draw() {
@@ -435,14 +485,36 @@ function Draw() {
   for (const p of particles) {
     gradients.push(Gradient(Simplex, p));
   }
-  const rotated = RotatePoints(particles, cameraRotation);
-  const translated = TranslatePoints(rotated, [0, 0, 3]);
-  //const vertices = TranslatePointsInFrontOfCamera(rotated);
+  const centroid = Centroid(particles);
+  const negative = ScalarMultiply(centroid, -1);
+  const centered = TranslatePoints(particles, negative);
+  const radius = MaxMagnitude(centered);
+  const newCameraDistance = radius * Math.sqrt(2);
+  const alpha = 0.01;
+  if (!cameraDistance) {
+    cameraDistance = 1;
+  }
+  cameraDistance = alpha * newCameraDistance + (1 - alpha) * cameraDistance;
+  const rotated = RotatePoints(centered, cameraRotation);
+  const translated = TranslatePoints(rotated, [0, 0, cameraDistance]);
   const n = particles.length;
+  const zBuffer = [];
   for (let i = 0; i < n; i++) {
     const v = translated[i];
     const g = gradients[i];
-    DrawPoint3D(v, g);
+    zBuffer.push({ v, g });
+  }
+  zBuffer.sort((a, b) => {
+    if (a.v[2] < b.v[2]) {
+      return 1;
+    }
+    if (a.v[2] > b.v[2]) {
+      return -1;
+    }
+    return 0;
+  });
+  for (const b of zBuffer) {
+    DrawPoint3D(b.v, b.g);
   }
 }
 
@@ -458,15 +530,19 @@ let lastFrameEndTime = new Date().getTime();
 
 function DoOneFrame() {
   const startTime = new Date().getTime();
+  const maxMagnitude = RepelPoints();
+  if (maxMagnitude < speedLimit / 2 && particles.length < targetParticleCount) {
+    AddOneNewParticle();
+  }
   Draw();
   const endTime = new Date().getTime();
   const timeBetweenFrames = lastFrameEndTime - endTime;
-  cameraRotation += 0.00005 * timeBetweenFrames;
+  cameraRotation += 0.0001 * timeBetweenFrames;
   lastFrameEndTime = endTime;
   const elapsed = endTime - startTime;
-  const targetFrameDuration = 10;
+  const targetFrameDuration = 1;
   const timeUntilNextFrame = Math.max(targetFrameDuration - elapsed, 0);
-  console.log('sleep', timeUntilNextFrame);
+  console.log('camera', cameraDistance, 'particles', particles.length, 'elapsed', elapsed, 'sleep', timeUntilNextFrame, 'maxMagnitude', maxMagnitude);
   setTimeout(DoOneFrame, timeUntilNextFrame);
 }
 
@@ -485,25 +561,9 @@ function Start() {
   if (SimplexSquared(firstParticle) > infinitessimal) {
     throw 'This seed does not generate a valid shape. Converged to local minimum.';
   }
-  //particles.push(firstParticle);
+  particles.push(firstParticle);
   //const secondParticle = RandomlyDisplaceParticleAlongSurface(firstParticle);
   //console.log(firstParticle, secondParticle);
-  for (let i = 0; i < 25 * 1000; i++) {
-    // const stdev = 5;
-    // const r = [
-    //   RandomGaussian(0, stdev),
-    //   RandomGaussian(0, stdev),
-    //   RandomGaussian(0, stdev),
-    // ];
-    const scale = 1.5;
-    const r = [
-      scale * (Math.random() * 2 - 1),
-      scale * (Math.random() * 2 - 1),
-      scale * (Math.random() * 2 - 1),
-    ];
-    const s = GradientDescent(r);
-    particles.push(s);
-  }
   DoOneFrame();
 }
 
