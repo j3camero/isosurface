@@ -1,15 +1,17 @@
 const alea = require('alea');
+const d3 = require('d3-octree');
 const SimplexNoise = require('simplex-noise');
 
 const canvas = document.getElementById('thecanvas');
 const context = canvas.getContext('2d');
 
-const seed = '1111111111111111111111111111';
+const seed = '1111111111111111111111111111';  // Looks like a person.
+//const seed = '2222';
 const prng = alea(seed);
 const simplexState = SimplexNoise.createNoise3D(prng);
 
 // A big number used to define the infinitessimal.
-const bigNumber = 100 * 1000;
+const bigNumber = 1000 * 1000;
 // A tiny number that is re-used throughout the code as a threshold for
 // "close enough" to zero.
 const infinitessimal = 1 / bigNumber;
@@ -20,10 +22,11 @@ const infinitessimal = 1 / bigNumber;
 const speedLimit = 0.01;
 // Global multiplier for electrostatic repulsion forces between the particles.
 let forceStrength = 0.00001;
-// The maximum number of particles that will be created inside the simulation.
-const targetParticleCount = 512;
 // Overall brightness modified to adjust the brightness of 3D shapes and points.
 const brightnessMultiplier = 25;
+const targetTriangleEdgeLength = 0.05;
+let maxRepulsionRadius = 2.5 * targetTriangleEdgeLength;
+const levelCurve = 0.2;
 
 // Return a field. The desired level curve is defined by f(x, y, z) = 0.
 function Simplex(v) {
@@ -32,7 +35,6 @@ function Simplex(v) {
   const z = v[2];
   const s = simplexState(x, y, z);
   const p = 0.5 * (s + 1);
-  const levelCurve = 0.2;
   return p - levelCurve;
 }
 
@@ -253,28 +255,11 @@ function RandomlyDisplaceParticleAlongSurface(p) {
 const particles = [];
 
 // Add one new particle to the simulation.
-//
-// The core problem to be solved here is that the new point has to be guaranteed
-// to be on the same isosurface as all the others. We don't want to "hop" too
-// far from the existing points or else we risk ending up sticking to a
-// different isosurface, effectively "escaping" the targeted shape. The strategy
-// to solve this is to stay very close to one of the existing points. We place
-// the new particle very close to one of the existing points, chosen at random.
-//
-// We depend entirely on the elctrostatic repulsion force between the particles
-// to floodfill the isosurface. As the particles multiply and repel each other,
-// they should fill the whole isosurface.
-//
-// We don't rely on creating particles in random locations to discover the
-// regions of the isosurface to be filled. The reason is this risks hopping to
-// disconnected isosurfaces that tend to exist around the targeted one. The
-// extent and shape of the targeted isosurface is unknown to the algorithm at
-// the beginning, and we rely entirely on the particles pushing each other along
-// to flood the entire isosurface.
-function AddOneNewParticle() {
-  const n = particles.length;
-  const r = Math.floor(Math.random() * n);
-  const p = particles[r];
+function AddOneNewParticle(indexToCopy) {
+  //const n = particles.length;
+  //const r = Math.floor(n * Math.random());
+  //const p = particles[mostRecentlyMovedParticleIndex];
+  const p = particles[indexToCopy];
   const newParticle = RandomlyDisplaceParticleAlongSurface(p);
   particles.push(newParticle);
 }
@@ -289,31 +274,101 @@ function ProjectVectorOntoPlane(v, n) {
   return VectorSubtract(v, dv);
 }
 
-function RepelPoints() {
+function GetParticlesWithinSphere(octree, cx, cy, cz, radius) {
+  const neighbors = [];
+  const xmin = cx - radius;
+  const ymin = cy - radius;
+  const zmin = cz - radius;
+  const xmax = cx + radius;
+  const ymax = cy + radius;
+  const zmax = cz + radius;
+  const r2 = radius * radius;
+  octree.visit((node, x1, y1, z1, x2, y2, z2) => {
+    if (!node.length) {
+      do {
+        const [px, py, pz] = node.data;
+        if (px >= xmin && px < xmax &&
+            py >= ymin && py < ymax &&
+            pz >= zmin && pz < zmax) {
+          const dx = px - cx;
+          const dy = py - cy;
+          const dz = pz - cz;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < r2 && d2 > 0) {
+            neighbors.push([px, py, pz]);
+          }
+        }
+      } while (node = node.next);
+    }
+    return x1 >= xmax || y1 >= ymax || z1 >= zmax || x2 < xmin || y2 < ymin || z2 < zmin;
+  });
+  return neighbors;
+}
+
+function Median(v) {
+  const n = v.length;
+  if (n === 0){
+    return null;
+  }
+  const i = Math.floor(n / 2);
+  v.sort();
+  if (n % 2 === 0) {
+    return (v[i - 1] + v[i]) / 2;
+  } else {
+    return v[i];
+  }
+}
+
+let mostRecentlyMovedParticleIndex = 0;
+
+function RepelParticles() {
   const n = particles.length;
   // Calculate 3D electrostatic forces between pairs of particles.
   const forces = [];
+  let neighborCount = 0;
+  let maxMinSq;
+  let mostIsolatedIndex = 0;
+  const minSqList = [];
+  // Use an octree to efficiently locate each particle's neighbors.
+  const tree = d3.octree().addAll(particles);
   for (let i = 0; i < n; i++) {
-    forces.push([0, 0, 0]);
-    for (let j = 0; j < n; j++) {
-      if (i === j) {
-        continue;
-      }
-      const diff = VectorSubtract(particles[i], particles[j]);
+    let totalForce = [0, 0, 0];
+    const p = particles[i];
+    const [x, y, z] = p;
+    const neighbors = GetParticlesWithinSphere(tree, x, y, z, maxRepulsionRadius);
+    neighborCount += neighbors.length;
+    let minSq = 1;
+    for (const neighbor of neighbors) {
+      const diff = VectorSubtract(p, neighbor);
       const sq = SquaredLength(diff);
+      minSq = Math.min(sq, minSq);
       const inv = 1.0 / sq;
       const dir = Normalize(diff);
-      const f = ScalarMultiply(dir, forceStrength * inv);
-      forces[i] = VectorAdd(forces[i], f);
+      const force = ScalarMultiply(dir, forceStrength * inv);
+      totalForce = VectorAdd(totalForce, force);
     }
+    forces.push(totalForce);
+    if (!maxMinSq || minSq > maxMinSq) {
+      maxMinSq = minSq;
+      mostIsolatedIndex = i;
+    }
+    minSqList.push(minSq);
   }
+  const averageNeighbors = neighborCount / n;
+  const mostIsolatedDistance = Math.sqrt(maxMinSq);
+  const medianMinSq = Median(minSqList);
+  const medianSeparation = Math.sqrt(medianMinSq);
   // Project the 3D forces onto 2D planes aligned with the surface.
-  let maxMagnitude = 0;
+  let maxMagnitude = -1;
   for (let i = 0; i < n; i++) {
     const gradient = Gradient(Simplex, particles[i]);
     forces[i] = ProjectVectorOntoPlane(forces[i], gradient);
     const mag = Length(forces[i]);
     maxMagnitude = Math.max(mag, maxMagnitude);
+    if (mag > maxMagnitude) {
+      maxMagnitude = mag;
+      mostRecentlyMovedParticleIndex = i;
+    }
   }
   // Impose speed limit.
   if (maxMagnitude > speedLimit) {
@@ -326,7 +381,7 @@ function RepelPoints() {
   for (let i = 0; i < n; i++) {
     particles[i] = NewtonRaphson(VectorAdd(particles[i], forces[i]));
   }
-  return maxMagnitude;
+  return [mostIsolatedIndex, mostIsolatedDistance, medianSeparation, averageNeighbors];
 }
 
 // Given a list of 2D points like [(x, y), ...] returns a point [cx, cy] that
@@ -529,10 +584,19 @@ function RandomGaussian(mean, stdev) {
 let lastFrameEndTime = new Date().getTime();
 
 function DoOneFrame() {
+  const log = {};
   const startTime = new Date().getTime();
-  const maxMagnitude = RepelPoints();
-  if (maxMagnitude < speedLimit / 2 && particles.length < targetParticleCount) {
-    AddOneNewParticle();
+  if (forceStrength > infinitessimal * infinitessimal) {
+    const [mostIsolatedIndex, mostIsolatedDistance, medianSeparation, averageNeighbors] = RepelParticles();
+    if (medianSeparation > targetTriangleEdgeLength) {
+      AddOneNewParticle(mostIsolatedIndex);
+      forceStrength = 0.001;
+    }
+    const halfLifeInFrames = 50;
+    const decayRate = Math.pow(0.5, 1 / halfLifeInFrames);
+    forceStrength *= decayRate;
+    log['averageNeighbors'] = averageNeighbors.toFixed(2);
+    log['medianSeparation'] = medianSeparation.toFixed(3);
   }
   Draw();
   const endTime = new Date().getTime();
@@ -540,10 +604,11 @@ function DoOneFrame() {
   cameraRotation += 0.0001 * timeBetweenFrames;
   lastFrameEndTime = endTime;
   const elapsed = endTime - startTime;
-  const targetFrameDuration = 1;
-  const timeUntilNextFrame = Math.max(targetFrameDuration - elapsed, 0);
-  console.log('camera', cameraDistance, 'particles', particles.length, 'elapsed', elapsed, 'sleep', timeUntilNextFrame, 'maxMagnitude', maxMagnitude);
-  setTimeout(DoOneFrame, timeUntilNextFrame);
+  log['particles'] = particles.length;
+  log['forceStrength'] = forceStrength.toExponential(2);
+  log['elapsed'] = elapsed;
+  console.log(log);
+  setTimeout(DoOneFrame, 0);
 }
 
 function OnResize() {
